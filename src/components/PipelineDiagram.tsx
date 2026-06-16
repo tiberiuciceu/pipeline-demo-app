@@ -6,6 +6,8 @@ type PipelineStep =
   | 'ticket_received' | 'workspace' | 'clone' | 'branch' | 'agents_md'
   | 'implementer' | 'verifier' | 'reviewer' | 'commit' | 'push' | 'pr' | 'jira' | 'done'
 
+// workspace and clone are merged visually into one "Setting up environment" step
+
 type StepStatus = 'active' | 'done' | 'failed'
 
 interface StepState {
@@ -25,8 +27,7 @@ interface RunState {
 
 const STEP_DEFS: Array<{ id: PipelineStep; label: string; icon: React.ReactElement }> = [
   { id: 'ticket_received', label: 'Ticket received', icon: <TicketIcon /> },
-  { id: 'workspace', label: 'Creating workspace', icon: <WorkspaceIcon /> },
-  { id: 'clone', label: 'Cloning repository', icon: <CloneIcon /> },
+  { id: 'clone', label: 'Setting up environment', icon: <CloneIcon /> },
   { id: 'branch', label: 'Creating branch', icon: <BranchIcon /> },
   { id: 'agents_md', label: 'Reading conventions', icon: <BookIcon /> },
   { id: 'implementer', label: 'Implementer agent', icon: <BotIcon /> },
