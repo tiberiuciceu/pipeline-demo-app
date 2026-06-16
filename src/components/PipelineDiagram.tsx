@@ -124,6 +124,19 @@ export const PipelineDiagram = (): React.ReactElement => {
   const prUrl = stateFor('pr')?.detail ?? null
   const hasDetails = allFiles.length > 0 || latestReview !== null
 
+  const handleReset = async () => {
+    const key = run?.ticketKey
+    stepMap.current.clear()
+    activatedAt.current.clear()
+    setRun(null)
+    if (key) {
+      await fetch(`${PIPELINE_URL}/reset/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        headers: { 'x-webhook-secret': 'f84d04b917de51b26bb6c0ba66c2baa24011cf7a71c67db18f5e5274b6d20e5e' },
+      }).catch(() => { /* silent — local clear already happened */ })
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* Header */}
@@ -146,6 +159,11 @@ export const PipelineDiagram = (): React.ReactElement => {
         <div className="flex items-center gap-3">
           {run && !isDone && !isFailed && (
             <span className="font-mono text-sm text-gray-400">{fmtDuration(elapsed * 1000)}</span>
+          )}
+          {run && (
+            <button onClick={handleReset} className="text-xs text-gray-300 hover:text-gray-400 transition-colors" title="Clear diagram">
+              ↺ Clear
+            </button>
           )}
           <div className="flex items-center gap-1.5">
             <span className={`h-2 w-2 rounded-full transition-colors duration-500 ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-300'}`} />
@@ -170,9 +188,15 @@ export const PipelineDiagram = (): React.ReactElement => {
       {isFailed && (
         <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-3">
           <AlertIcon className="h-5 w-5 shrink-0 text-red-500" />
-          <p className="text-sm font-medium text-red-700">
+          <p className="text-sm font-medium text-red-700 flex-1">
             Pipeline failed — {stateFor('done')?.detail ?? 'check logs'}
           </p>
+          <button
+            onClick={handleReset}
+            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 transition-colors"
+          >
+            ↺ Reset
+          </button>
         </div>
       )}
 

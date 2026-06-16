@@ -9,7 +9,7 @@ export default function PipelinePage(): React.ReactElement {
           Live view of the agentic pipeline — updates in real time as each step runs.
         </p>
       </div>
-      <div className="mx-auto max-w-lg">
+      <div className="mx-auto max-w-3xl">
         <PipelineDiagram />
       </div>
     </div>
