@@ -6,15 +6,24 @@ type PipelineStep =
   | 'ticket_received' | 'workspace' | 'clone' | 'branch' | 'agents_md'
   | 'implementer' | 'verifier' | 'reviewer' | 'commit' | 'push' | 'pr' | 'jira' | 'done'
 
-// workspace and clone are merged visually into one "Setting up environment" step
-
 type StepStatus = 'active' | 'done' | 'failed'
+
+interface ReviewData {
+  summary: string
+  blocking: Array<{ file: string; line: number | null; message: string }>
+  suggestions: Array<{ file: string; line: number | null; message: string }>
+}
 
 interface StepState {
   step: PipelineStep
   status: StepStatus
   label: string
   detail: string | null
+  costUsd: number | null
+  filesChanged: string[] | null
+  reviewData: ReviewData | null
+  activatedAt: number
+  completedAt: number | null
   timestamp: number
 }
 
@@ -25,31 +34,47 @@ interface RunState {
   startedAt: number
 }
 
-const STEP_DEFS: Array<{ id: PipelineStep; label: string; icon: React.ReactElement }> = [
-  { id: 'ticket_received', label: 'Ticket received', icon: <TicketIcon /> },
-  { id: 'clone', label: 'Setting up environment', icon: <CloneIcon /> },
-  { id: 'branch', label: 'Creating branch', icon: <BranchIcon /> },
-  { id: 'agents_md', label: 'Reading conventions', icon: <BookIcon /> },
-  { id: 'implementer', label: 'Implementer agent', icon: <BotIcon /> },
-  { id: 'verifier', label: 'Writing & running tests', icon: <TestIcon /> },
-  { id: 'reviewer', label: 'Code review', icon: <ReviewIcon /> },
-  { id: 'commit', label: 'Committing changes', icon: <CommitIcon /> },
-  { id: 'push', label: 'Pushing to GitHub', icon: <PushIcon /> },
-  { id: 'pr', label: 'Opening draft PR', icon: <PrIcon /> },
-  { id: 'jira', label: 'Updating Jira ticket', icon: <JiraIcon /> },
-  { id: 'done', label: 'Pipeline complete', icon: <DoneIcon /> },
+const STEP_DEFS: Array<{ id: PipelineStep; label: string; isAgent: boolean; icon: React.ReactElement }> = [
+  { id: 'ticket_received', label: 'Ticket received', isAgent: false, icon: <TicketIcon /> },
+  { id: 'clone', label: 'Setting up environment', isAgent: false, icon: <CloneIcon /> },
+  { id: 'branch', label: 'Creating branch', isAgent: false, icon: <BranchIcon /> },
+  { id: 'agents_md', label: 'Reading conventions', isAgent: false, icon: <BookIcon /> },
+  { id: 'implementer', label: 'Implementer agent', isAgent: true, icon: <BotIcon /> },
+  { id: 'verifier', label: 'Writing & running tests', isAgent: true, icon: <TestIcon /> },
+  { id: 'reviewer', label: 'Code review', isAgent: true, icon: <ReviewIcon /> },
+  { id: 'commit', label: 'Committing changes', isAgent: false, icon: <CommitIcon /> },
+  { id: 'push', label: 'Pushing to GitHub', isAgent: false, icon: <PushIcon /> },
+  { id: 'pr', label: 'Opening draft PR', isAgent: false, icon: <PrIcon /> },
+  { id: 'jira', label: 'Updating Jira ticket', isAgent: false, icon: <JiraIcon /> },
+  { id: 'done', label: 'Pipeline complete', isAgent: false, icon: <DoneIcon /> },
 ]
 
 const PIPELINE_URL = process.env.NEXT_PUBLIC_PIPELINE_URL ?? 'http://localhost:3000'
 
+const fmtDuration = (ms: number): string => {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+const fmtCost = (usd: number): string => `$${usd.toFixed(4)}`
+
 export const PipelineDiagram = (): React.ReactElement => {
   const [run, setRun] = useState<RunState | null>(null)
   const [connected, setConnected] = useState(false)
+  const [activeTab, setActiveTab] = useState<'files' | 'review'>('files')
+  const [elapsed, setElapsed] = useState(0)
   const stepMap = useRef<Map<PipelineStep, StepState>>(new Map())
+  const activatedAt = useRef<Map<PipelineStep, number>>(new Map())
+
+  useEffect(() => {
+    if (!run) { setElapsed(0); return }
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - run.startedAt) / 1000)), 500)
+    return () => clearInterval(t)
+  }, [run?.startedAt])
 
   useEffect(() => {
     const es = new EventSource(`${PIPELINE_URL}/pipeline/events`)
-
     es.onopen = () => setConnected(true)
     es.onerror = () => setConnected(false)
 
@@ -57,188 +82,288 @@ export const PipelineDiagram = (): React.ReactElement => {
       try {
         const data = JSON.parse(e.data) as
           | { type: 'init'; ticketKey: string | null; ticketSummary: string | null; steps: StepState[]; startedAt: number | null }
-          | { type: 'step' } & StepState & { ticketKey: string; ticketSummary: string | null }
+          | ({ type: 'step' } & Omit<StepState, 'activatedAt' | 'completedAt'> & { ticketKey: string; ticketSummary: string | null })
 
         if (data.type === 'init') {
+          stepMap.current.clear()
+          activatedAt.current.clear()
           if (!data.ticketKey || !data.startedAt) { setRun(null); return }
-          stepMap.current = new Map(data.steps.map(s => [s.step, s]))
-          setRun({
-            ticketKey: data.ticketKey,
-            ticketSummary: data.ticketSummary,
-            steps: [...stepMap.current.values()],
-            startedAt: data.startedAt,
-          })
+          for (const s of data.steps) {
+            const at = s.activatedAt ?? s.timestamp
+            if (s.status === 'active') activatedAt.current.set(s.step, at)
+            stepMap.current.set(s.step, { ...s, activatedAt: at, completedAt: s.completedAt ?? null })
+          }
+          setRun({ ticketKey: data.ticketKey, ticketSummary: data.ticketSummary, steps: [...stepMap.current.values()], startedAt: data.startedAt })
           return
         }
 
         if (data.type === 'step') {
-          const entry: StepState = { step: data.step, status: data.status, label: data.label, detail: data.detail, timestamp: data.timestamp }
+          const now = Date.now()
+          let at = activatedAt.current.get(data.step) ?? now
+          let completedAt: number | null = null
+          if (data.status === 'active') { at = now; activatedAt.current.set(data.step, now) }
+          if (data.status === 'done' || data.status === 'failed') { completedAt = now }
+          const entry: StepState = { ...data, activatedAt: at, completedAt }
           stepMap.current.set(data.step, entry)
           setRun(prev => prev
-            ? { ...prev, ticketKey: data.ticketKey, ticketSummary: data.ticketSummary, steps: [...stepMap.current.values()] }
-            : { ticketKey: data.ticketKey, ticketSummary: data.ticketSummary, steps: [...stepMap.current.values()], startedAt: Date.now() }
+            ? { ...prev, steps: [...stepMap.current.values()] }
+            : { ticketKey: data.ticketKey, ticketSummary: data.ticketSummary, steps: [...stepMap.current.values()], startedAt: now }
           )
         }
-      } catch { /* ignore parse errors */ }
+      } catch { /* ignore */ }
     }
-
     return () => { es.close(); setConnected(false) }
   }, [])
 
-  const stateFor = (id: PipelineStep): StepState | undefined =>
-    run?.steps.find(s => s.step === id)
-
-  const isActive = (id: PipelineStep) => stateFor(id)?.status === 'active'
-  const isDone = (id: PipelineStep) => stateFor(id)?.status === 'done'
-  const isFailed = (id: PipelineStep) => stateFor(id)?.status === 'failed'
-  const isPending = (id: PipelineStep) => !stateFor(id)
-
-  const isDiagramDone = isDone('done')
-  const isDiagramFailed = isFailed('done')
+  const stateFor = (id: PipelineStep) => run?.steps.find(s => s.step === id)
+  const totalCost = run?.steps.reduce((sum, s) => sum + (s.costUsd ?? 0), 0) ?? 0
+  const allFiles = [...new Set(run?.steps.filter(s => s.filesChanged).flatMap(s => s.filesChanged ?? []) ?? [])]
+  const latestReview = [...(run?.steps.filter(s => s.step === 'reviewer' && s.reviewData) ?? [])].pop()?.reviewData ?? null
+  const isDone = stateFor('done')?.status === 'done'
+  const isFailed = stateFor('done')?.status === 'failed'
+  const prUrl = stateFor('pr')?.detail ?? null
+  const hasDetails = allFiles.length > 0 || latestReview !== null
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">
-            {run ? `${run.ticketKey}` : 'Waiting for pipeline…'}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-gray-900">
+              {run ? run.ticketKey : 'Waiting for pipeline…'}
+            </h2>
+            {run && totalCost > 0 && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600 ring-1 ring-inset ring-amber-200">
+                {fmtCost(totalCost)} total
+              </span>
+            )}
+          </div>
           <p className="mt-0.5 text-sm text-gray-500">
             {run?.ticketSummary ?? 'Move a Jira ticket to In Progress to start the pipeline.'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-300'}`} />
-          <span className="text-xs text-gray-400">{connected ? 'Connected' : 'Disconnected'}</span>
+        <div className="flex items-center gap-3">
+          {run && !isDone && !isFailed && (
+            <span className="font-mono text-sm text-gray-400">{fmtDuration(elapsed * 1000)}</span>
+          )}
+          <div className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full transition-colors duration-500 ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-300'}`} />
+            <span className="text-xs text-gray-400">{connected ? 'Connected' : 'Disconnected'}</span>
+          </div>
         </div>
       </div>
 
-      {/* Diagram */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        {isDiagramDone && (
-          <div className="mb-6 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <span className="text-emerald-500">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </span>
-            <p className="text-sm font-medium text-emerald-700">
-              Pipeline complete — draft PR opened on GitHub
-            </p>
-            {run?.steps.find(s => s.step === 'pr')?.detail && (
-              <a
-                href={run.steps.find(s => s.step === 'pr')?.detail ?? '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-auto text-xs font-medium text-emerald-600 underline"
-              >
-                View PR →
-              </a>
-            )}
-          </div>
-        )}
-        {isDiagramFailed && (
-          <div className="mb-6 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-            <span className="text-red-500">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-              </svg>
-            </span>
-            <p className="text-sm font-medium text-red-700">
-              Pipeline failed — {run?.steps.find(s => s.step === 'done')?.detail ?? 'check audit log'}
-            </p>
-          </div>
-        )}
-
-        <div className="flex flex-col">
-          {STEP_DEFS.map((def, i) => {
-            const active = isActive(def.id)
-            const done = isDone(def.id)
-            const failed = isFailed(def.id)
-            const pending = isPending(def.id)
-            const state = stateFor(def.id)
-            const isLast = i === STEP_DEFS.length - 1
-
-            return (
-              <div key={def.id} className="flex gap-4">
-                {/* Left column: connector line + icon */}
-                <div className="flex flex-col items-center">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-500 ${
-                    active
-                      ? 'border-indigo-500 bg-indigo-50 text-indigo-600 shadow-[0_0_0_4px_rgba(99,102,241,0.15)]'
-                      : done
-                        ? 'border-emerald-500 bg-emerald-50 text-emerald-600'
-                        : failed
-                          ? 'border-red-400 bg-red-50 text-red-500'
-                          : 'border-gray-200 bg-white text-gray-300'
-                  }`}>
-                    {active
-                      ? <Spinner />
-                      : done
-                        ? <CheckIcon />
-                        : failed
-                          ? <XIcon />
-                          : def.icon
-                    }
-                  </div>
-                  {!isLast && (
-                    <div className={`mt-1 w-0.5 flex-1 min-h-[20px] rounded transition-colors duration-500 ${
-                      done ? 'bg-emerald-300' : active ? 'bg-indigo-200' : 'bg-gray-100'
-                    }`} />
-                  )}
-                </div>
-
-                {/* Right column: labels */}
-                <div className={`pb-5 pt-1.5 min-w-0 flex-1 ${isLast ? 'pb-0' : ''}`}>
-                  <p className={`text-sm font-medium transition-colors duration-300 ${
-                    active ? 'text-indigo-600' : done ? 'text-gray-900' : failed ? 'text-red-600' : 'text-gray-300'
-                  }`}>
-                    {state?.label ?? def.label}
-                  </p>
-                  {(active || done || failed) && state?.detail && (
-                    <p className={`mt-0.5 truncate text-xs ${
-                      active ? 'text-indigo-400' : failed ? 'text-red-400' : 'text-gray-400'
-                    }`}>
-                      {state.detail}
-                    </p>
-                  )}
-                  {active && <ElapsedTimer since={state?.timestamp ?? Date.now()} />}
-                </div>
-              </div>
-            )
-          })}
+      {/* Status banner */}
+      {isDone && (
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3">
+          <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-500" />
+          <p className="text-sm font-medium text-emerald-700">Pipeline complete — draft PR opened on GitHub</p>
+          {prUrl && (
+            <a href={prUrl} target="_blank" rel="noopener noreferrer"
+              className="ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors">
+              View PR →
+            </a>
+          )}
         </div>
+      )}
+      {isFailed && (
+        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-3">
+          <AlertIcon className="h-5 w-5 shrink-0 text-red-500" />
+          <p className="text-sm font-medium text-red-700">
+            Pipeline failed — {stateFor('done')?.detail ?? 'check logs'}
+          </p>
+        </div>
+      )}
+
+      {/* Main area */}
+      <div className={`flex gap-4 ${hasDetails ? '' : ''}`}>
+        {/* Steps */}
+        <div className="flex-1 min-w-0 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col">
+            {STEP_DEFS.map((def, i) => {
+              const state = stateFor(def.id)
+              const active = state?.status === 'active'
+              const done = state?.status === 'done'
+              const failed = state?.status === 'failed'
+              const isLast = i === STEP_DEFS.length - 1
+              const durationMs = done || failed
+                ? (state?.completedAt ?? Date.now()) - (state?.activatedAt ?? Date.now())
+                : null
+              const prevState = i > 0 ? stateFor(STEP_DEFS[i - 1]!.id) : null
+              const isFixPass = def.id === 'implementer' && active && state?.label?.toLowerCase().includes('fix')
+
+              return (
+                <div key={def.id} className="flex gap-4">
+                  {/* Connector column */}
+                  <div className="flex flex-col items-center">
+                    <div className={`
+                      flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2
+                      transition-all duration-700 ease-in-out
+                      ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-600 shadow-[0_0_0_4px_rgba(99,102,241,0.12)]'
+                        : done ? 'border-emerald-500 bg-emerald-50 text-emerald-600'
+                        : failed ? 'border-red-400 bg-red-50 text-red-500'
+                        : 'border-gray-200 bg-white text-gray-300'}
+                    `}>
+                      {active ? <Spinner /> : done ? <CheckIcon /> : failed ? <XIcon /> : def.icon}
+                    </div>
+                    {!isLast && (
+                      <div className={`mt-1 w-0.5 flex-1 min-h-[24px] rounded transition-all duration-700 ${
+                        done ? 'bg-emerald-300' : active ? 'bg-indigo-200' : 'bg-gray-100'
+                      }`} />
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className={`pt-1.5 pb-6 flex-1 min-w-0 ${isLast ? 'pb-0' : ''}`}>
+                    {/* Fix-pass return indicator */}
+                    {isFixPass && prevState?.step === 'reviewer' && (
+                      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-violet-500">
+                        <span className="text-[10px]">↺</span>
+                        <span>Reviewer sent back for fixes</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <p className={`text-sm font-medium transition-colors duration-700 ${
+                        active ? 'text-indigo-600' : done ? 'text-gray-900' : failed ? 'text-red-600' : 'text-gray-300'
+                      }`}>
+                        {state?.label ?? def.label}
+                      </p>
+                      {/* Duration */}
+                      {durationMs !== null && durationMs > 0 && (
+                        <span className="text-xs text-gray-400 font-mono">{fmtDuration(durationMs)}</span>
+                      )}
+                      {/* Cost badge */}
+                      {(done || failed) && state?.costUsd && state.costUsd > 0 && (
+                        <span className="text-xs font-medium text-amber-500">{fmtCost(state.costUsd)}</span>
+                      )}
+                    </div>
+
+                    {/* Detail text */}
+                    {(active || done || failed) && state?.detail && (
+                      <p className={`mt-0.5 truncate text-xs transition-colors duration-700 ${
+                        active ? 'text-indigo-400' : failed ? 'text-red-400' : 'text-gray-400'
+                      }`}>
+                        {state.detail}
+                      </p>
+                    )}
+
+                    {/* Elapsed timer for active step */}
+                    {active && <ElapsedTimer since={state?.activatedAt ?? Date.now()} />}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Details panel */}
+        {hasDetails && (
+          <div className="w-72 shrink-0 rounded-xl border border-gray-200 bg-white shadow-sm flex flex-col overflow-hidden">
+            {/* Tabs */}
+            <div className="flex border-b border-gray-100">
+              <button
+                onClick={() => setActiveTab('files')}
+                className={`flex-1 py-3 text-xs font-semibold transition-colors ${
+                  activeTab === 'files' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Files changed {allFiles.length > 0 && `(${allFiles.length})`}
+              </button>
+              <button
+                onClick={() => setActiveTab('review')}
+                className={`flex-1 py-3 text-xs font-semibold transition-colors ${
+                  activeTab === 'review' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Review {latestReview && latestReview.blocking.length > 0 && (
+                  <span className="ml-1 rounded-full bg-red-100 px-1.5 text-red-600">{latestReview.blocking.length}</span>
+                )}
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {activeTab === 'files' && (
+                allFiles.length === 0
+                  ? <p className="text-xs text-gray-400">No files changed yet.</p>
+                  : (
+                    <ul className="flex flex-col gap-1">
+                      {allFiles.map(f => (
+                        <li key={f} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                          <FileIcon />
+                          <span className="text-xs font-mono text-gray-700 truncate">{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+              )}
+
+              {activeTab === 'review' && (
+                latestReview === null
+                  ? <p className="text-xs text-gray-400">No review yet.</p>
+                  : (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <p className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Summary</p>
+                        <p className="text-xs text-gray-600 leading-relaxed">{latestReview.summary}</p>
+                      </div>
+                      {latestReview.blocking.length > 0 && (
+                        <div>
+                          <p className="mb-2 text-xs font-semibold text-red-500 uppercase tracking-wide">
+                            Blocking ({latestReview.blocking.length})
+                          </p>
+                          <ul className="flex flex-col gap-2">
+                            {latestReview.blocking.map((f, i) => (
+                              <li key={i} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                                <p className="text-xs font-mono text-red-600 truncate">{f.file}{f.line ? `:${f.line}` : ''}</p>
+                                <p className="mt-0.5 text-xs text-red-700">{f.message}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {latestReview.suggestions.length > 0 && (
+                        <div>
+                          <p className="mb-2 text-xs font-semibold text-amber-500 uppercase tracking-wide">
+                            Suggestions ({latestReview.suggestions.length})
+                          </p>
+                          <ul className="flex flex-col gap-2">
+                            {latestReview.suggestions.map((f, i) => (
+                              <li key={i} className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                                <p className="text-xs font-mono text-amber-600 truncate">{f.file}{f.line ? `:${f.line}` : ''}</p>
+                                <p className="mt-0.5 text-xs text-amber-700">{f.message}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-// Elapsed time counter shown next to the active step
+// ── Elapsed timer ─────────────────────────────────────────────────────────────
+
 const ElapsedTimer = ({ since }: { since: number }): React.ReactElement => {
-  const [elapsed, setElapsed] = useState(0)
+  const [ms, setMs] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - since) / 1000)), 500)
+    const t = setInterval(() => setMs(Date.now() - since), 500)
     return () => clearInterval(t)
   }, [since])
-  const m = Math.floor(elapsed / 60)
-  const s = elapsed % 60
-  return (
-    <p className="mt-1 font-mono text-xs text-indigo-400">
-      {m > 0 ? `${m}m ` : ''}{s}s
-    </p>
-  )
+  return <p className="mt-1 font-mono text-xs text-indigo-400 animate-pulse">{fmtDuration(ms)}</p>
 }
 
-// ── Icons ────────────────────────────────────────────────────────────────────
+// ── Icons ─────────────────────────────────────────────────────────────────────
 
 function Spinner(): React.ReactElement {
-  return (
-    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  )
+  return <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
 }
 function CheckIcon(): React.ReactElement {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
@@ -246,11 +371,17 @@ function CheckIcon(): React.ReactElement {
 function XIcon(): React.ReactElement {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
 }
+function CheckCircleIcon({ className }: { className?: string }): React.ReactElement {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+}
+function AlertIcon({ className }: { className?: string }): React.ReactElement {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+}
+function FileIcon(): React.ReactElement {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5 shrink-0 text-gray-400"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+}
 function TicketIcon(): React.ReactElement {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 6v.75a3.375 3.375 0 001.5 2.836v1.828a3.375 3.375 0 00-1.5 2.836V15m0-9H18a3 3 0 013 3v.75M16.5 15H18a3 3 0 003-3v-.75M7.5 6H6a3 3 0 00-3 3v.75M7.5 6v.75a3.375 3.375 0 01-1.5 2.836v1.828A3.375 3.375 0 017.5 14.25V15m0-9h9" /></svg>
-}
-function WorkspaceIcon(): React.ReactElement {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
 }
 function CloneIcon(): React.ReactElement {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
