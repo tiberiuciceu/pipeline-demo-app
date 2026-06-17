@@ -130,6 +130,8 @@ export const PipelineDiagram = (): React.ReactElement => {
   const prUrl = stateFor('pr')?.detail ?? null
   const hasDetails = allFiles.length > 0 || latestReview !== null
 
+  const SECRET = 'f84d04b917de51b26bb6c0ba66c2baa24011cf7a71c67db18f5e5274b6d20e5e'
+
   const handleReset = async () => {
     const key = run?.ticketKey
     stepMap.current.clear()
@@ -138,10 +140,21 @@ export const PipelineDiagram = (): React.ReactElement => {
     if (key) {
       await fetch(`${PIPELINE_URL}/reset/${encodeURIComponent(key)}`, {
         method: 'DELETE',
-        headers: { 'x-webhook-secret': 'f84d04b917de51b26bb6c0ba66c2baa24011cf7a71c67db18f5e5274b6d20e5e' },
-      }).catch(() => { /* silent — local clear already happened */ })
+        headers: { 'x-webhook-secret': SECRET },
+      }).catch(() => {})
     }
   }
+
+  const handleStop = async () => {
+    await fetch(`${PIPELINE_URL}/stop`, {
+      method: 'POST',
+      headers: { 'x-webhook-secret': SECRET },
+    }).catch(() => {})
+    // Also clear local state after a brief delay so the "Stopped by user" event arrives first
+    setTimeout(() => handleReset(), 800)
+  }
+
+  const isRunning = run !== null && !isDone && !isFailed
 
   return (
     <div className="flex flex-col gap-4">
@@ -169,7 +182,16 @@ export const PipelineDiagram = (): React.ReactElement => {
               {totalCost > 0 && <span className="font-semibold text-amber-500">{fmtCost(totalCost)}</span>}
             </div>
           )}
-          {run && (
+          {isRunning && (
+            <button
+              onClick={handleStop}
+              className="rounded-lg bg-red-500 px-3 py-1 text-xs font-semibold text-white hover:bg-red-600 transition-colors"
+              title="Stop pipeline"
+            >
+              ■ Stop
+            </button>
+          )}
+          {run && !isRunning && (
             <button onClick={handleReset} className="text-xs text-gray-300 hover:text-gray-500 transition-colors" title="Clear diagram">
               ↺ Clear
             </button>
