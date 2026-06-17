@@ -1,6 +1,7 @@
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
 import type { Status } from '../components/StatusBadge'
+import { formatRelativeTime } from '../lib/formatters'
 
 const stats = [
   {
@@ -49,12 +50,13 @@ const stats = [
   },
 ]
 
-const activity: Array<{ key: string; title: string; status: Status; assignee: string; date: string }> = [
-  { key: 'KAN-14', title: 'Add formatRelativeTime utility to formatters', status: 'in-progress', assignee: 'TC', date: '2 hours ago' },
-  { key: 'KAN-13', title: 'Implement dark mode toggle for dashboard', status: 'open', assignee: 'AR', date: '4 hours ago' },
-  { key: 'KAN-12', title: 'Add array utility functions to shared lib', status: 'completed', assignee: 'MJ', date: 'Yesterday' },
-  { key: 'KAN-11', title: 'Fix pagination on projects list page', status: 'completed', assignee: 'TC', date: 'Yesterday' },
-  { key: 'KAN-10', title: 'Migrate auth service to JWT tokens', status: 'blocked', assignee: 'SP', date: '3 days ago' },
+const now = Date.now()
+const activity: Array<{ key: string; title: string; status: Status; assignee: string; date: Date }> = [
+  { key: 'KAN-14', title: 'Add formatRelativeTime utility to formatters', status: 'in-progress', assignee: 'TC', date: new Date(now - 2 * 60 * 60 * 1000) },
+  { key: 'KAN-13', title: 'Implement dark mode toggle for dashboard', status: 'open', assignee: 'AR', date: new Date(now - 4 * 60 * 60 * 1000) },
+  { key: 'KAN-12', title: 'Add array utility functions to shared lib', status: 'completed', assignee: 'MJ', date: new Date(now - 24 * 60 * 60 * 1000) },
+  { key: 'KAN-11', title: 'Fix pagination on projects list page', status: 'completed', assignee: 'TC', date: new Date(now - 36 * 60 * 60 * 1000) },
+  { key: 'KAN-10', title: 'Migrate auth service to JWT tokens', status: 'blocked', assignee: 'SP', date: new Date(now - 3 * 24 * 60 * 60 * 1000) },
 ]
 
 const avatarColors: Record<string, string> = {
@@ -97,7 +99,7 @@ export default function DashboardPage(): React.ReactElement {
                   <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColors[item.assignee] ?? 'bg-gray-400'}`}>
                     {item.assignee}
                   </div>
-                  <span className="w-20 text-right text-xs text-gray-400">{item.date}</span>
+                  <span className="w-20 text-right text-xs text-gray-400">{formatRelativeTime(item.date)}</span>
                 </div>
               </li>
             ))}
