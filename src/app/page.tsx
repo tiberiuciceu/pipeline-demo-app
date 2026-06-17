@@ -1,6 +1,7 @@
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
 import type { Status } from '../components/StatusBadge'
+import { PresenceDot } from '../components/PresenceDot'
 
 const stats = [
   {
@@ -94,8 +95,9 @@ export default function DashboardPage(): React.ReactElement {
                 <span className="flex-1 truncate text-sm text-gray-700">{item.title}</span>
                 <StatusBadge status={item.status} />
                 <div className="flex items-center gap-2">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColors[item.assignee] ?? 'bg-gray-400'}`}>
+                  <div className={`relative flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColors[item.assignee] ?? 'bg-gray-400'}`}>
                     {item.assignee}
+                    <PresenceDot userId={item.assignee} />
                   </div>
                   <span className="w-20 text-right text-xs text-gray-400">{item.date}</span>
                 </div>
