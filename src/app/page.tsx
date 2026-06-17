@@ -1,6 +1,7 @@
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
 import type { Status } from '../components/StatusBadge'
+import { getPresenceStatus, presenceColors } from '../lib/presence'
 
 const stats = [
   {
@@ -88,19 +89,28 @@ export default function DashboardPage(): React.ReactElement {
         </div>
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <ul className="divide-y divide-gray-100">
-            {activity.map(item => (
-              <li key={item.key} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors">
-                <span className="w-16 shrink-0 font-mono text-xs text-gray-400">{item.key}</span>
-                <span className="flex-1 truncate text-sm text-gray-700">{item.title}</span>
-                <StatusBadge status={item.status} />
-                <div className="flex items-center gap-2">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColors[item.assignee] ?? 'bg-gray-400'}`}>
-                    {item.assignee}
+            {activity.map(item => {
+              const status = getPresenceStatus(item.assignee)
+              return (
+                <li key={item.key} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors">
+                  <span className="w-16 shrink-0 font-mono text-xs text-gray-400">{item.key}</span>
+                  <span className="flex-1 truncate text-sm text-gray-700">{item.title}</span>
+                  <StatusBadge status={item.status} />
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColors[item.assignee] ?? 'bg-gray-400'}`}>
+                        {item.assignee}
+                      </div>
+                      <span
+                        className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${presenceColors[status]}`}
+                        aria-label={`${status}: ${item.assignee}`}
+                      />
+                    </div>
+                    <span className="w-20 text-right text-xs text-gray-400">{item.date}</span>
                   </div>
-                  <span className="w-20 text-right text-xs text-gray-400">{item.date}</span>
-                </div>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         </div>
       </div>
