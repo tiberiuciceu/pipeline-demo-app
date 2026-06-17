@@ -69,9 +69,15 @@ export const PipelineDiagram = (): React.ReactElement => {
 
   useEffect(() => {
     if (!run) { setElapsed(0); return }
+    const done = run.steps.some(s => s.step === 'done' && (s.status === 'done' || s.status === 'failed'))
+    if (done) {
+      const endStep = run.steps.find(s => s.step === 'done')
+      setElapsed(Math.floor(((endStep?.completedAt ?? Date.now()) - run.startedAt) / 1000))
+      return
+    }
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - run.startedAt) / 1000)), 500)
     return () => clearInterval(t)
-  }, [run?.startedAt])
+  }, [run?.startedAt, run?.steps])
 
   useEffect(() => {
     const es = new EventSource(`${PIPELINE_URL}/pipeline/events`)
@@ -156,12 +162,15 @@ export const PipelineDiagram = (): React.ReactElement => {
             {run?.ticketSummary ?? 'Move a Jira ticket to In Progress to start the pipeline.'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {run && !isDone && !isFailed && (
-            <span className="font-mono text-sm text-gray-400">{fmtDuration(elapsed * 1000)}</span>
+        <div className="flex items-center gap-4">
+          {run && (
+            <div className="flex items-center gap-3 text-sm">
+              <span className="font-mono text-gray-500">{fmtDuration(elapsed * 1000)}</span>
+              {totalCost > 0 && <span className="font-semibold text-amber-500">{fmtCost(totalCost)}</span>}
+            </div>
           )}
           {run && (
-            <button onClick={handleReset} className="text-xs text-gray-300 hover:text-gray-400 transition-colors" title="Clear diagram">
+            <button onClick={handleReset} className="text-xs text-gray-300 hover:text-gray-500 transition-colors" title="Clear diagram">
               ↺ Clear
             </button>
           )}
@@ -201,9 +210,9 @@ export const PipelineDiagram = (): React.ReactElement => {
       )}
 
       {/* Main area */}
-      <div className={`flex gap-4 ${hasDetails ? '' : ''}`}>
+      <div className="flex flex-col gap-4">
         {/* Steps */}
-        <div className="flex-1 min-w-0 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col">
             {STEP_DEFS.map((def, i) => {
               const state = stateFor(def.id)
@@ -254,13 +263,9 @@ export const PipelineDiagram = (): React.ReactElement => {
                       }`}>
                         {state?.label ?? def.label}
                       </p>
-                      {/* Duration */}
-                      {durationMs !== null && durationMs > 0 && (
-                        <span className="text-xs text-gray-400 font-mono">{fmtDuration(durationMs)}</span>
-                      )}
-                      {/* Cost badge */}
-                      {(done || failed) && state?.costUsd && state.costUsd > 0 && (
-                        <span className="text-xs font-medium text-amber-500">{fmtCost(state.costUsd)}</span>
+                      {/* Cost — only for agent steps */}
+                      {def.isAgent && (done || failed) && state?.costUsd && state.costUsd > 0 && (
+                        <span className="text-xs font-semibold text-amber-500">{fmtCost(state.costUsd)}</span>
                       )}
                     </div>
 
@@ -282,14 +287,14 @@ export const PipelineDiagram = (): React.ReactElement => {
           </div>
         </div>
 
-        {/* Details panel */}
+        {/* Details panel — full width below steps */}
         {hasDetails && (
-          <div className="w-72 shrink-0 rounded-xl border border-gray-200 bg-white shadow-sm flex flex-col overflow-hidden">
+          <div className="rounded-xl border border-gray-200 bg-white shadow-sm flex flex-col overflow-hidden">
             {/* Tabs */}
             <div className="flex border-b border-gray-100">
               <button
                 onClick={() => setActiveTab('files')}
-                className={`flex-1 py-3 text-xs font-semibold transition-colors ${
+                className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === 'files' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-gray-400 hover:text-gray-600'
                 }`}
               >
@@ -297,26 +302,26 @@ export const PipelineDiagram = (): React.ReactElement => {
               </button>
               <button
                 onClick={() => setActiveTab('review')}
-                className={`flex-1 py-3 text-xs font-semibold transition-colors ${
+                className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === 'review' ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/50' : 'text-gray-400 hover:text-gray-600'
                 }`}
               >
                 Review {latestReview && latestReview.blocking.length > 0 && (
-                  <span className="ml-1 rounded-full bg-red-100 px-1.5 text-red-600">{latestReview.blocking.length}</span>
+                  <span className="ml-1.5 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600">{latestReview.blocking.length} blocking</span>
                 )}
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="p-6">
               {activeTab === 'files' && (
                 allFiles.length === 0
-                  ? <p className="text-xs text-gray-400">No files changed yet.</p>
+                  ? <p className="text-sm text-gray-400">No files changed yet.</p>
                   : (
-                    <ul className="flex flex-col gap-1">
+                    <ul className="grid grid-cols-2 gap-2">
                       {allFiles.map(f => (
-                        <li key={f} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                        <li key={f} className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-3 border border-gray-100">
                           <FileIcon />
-                          <span className="text-xs font-mono text-gray-700 truncate">{f}</span>
+                          <span className="text-sm font-mono text-gray-700 truncate">{f}</span>
                         </li>
                       ))}
                     </ul>
@@ -325,23 +330,23 @@ export const PipelineDiagram = (): React.ReactElement => {
 
               {activeTab === 'review' && (
                 latestReview === null
-                  ? <p className="text-xs text-gray-400">No review yet.</p>
+                  ? <p className="text-sm text-gray-400">No review yet.</p>
                   : (
-                    <div className="flex flex-col gap-4">
-                      <div>
-                        <p className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Summary</p>
-                        <p className="text-xs text-gray-600 leading-relaxed">{latestReview.summary}</p>
+                    <div className="flex flex-col gap-6">
+                      <div className="rounded-xl bg-gray-50 p-4 border border-gray-100">
+                        <p className="mb-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Summary</p>
+                        <p className="text-sm text-gray-700 leading-relaxed">{latestReview.summary}</p>
                       </div>
                       {latestReview.blocking.length > 0 && (
                         <div>
-                          <p className="mb-2 text-xs font-semibold text-red-500 uppercase tracking-wide">
+                          <p className="mb-3 text-xs font-semibold text-red-500 uppercase tracking-wider">
                             Blocking ({latestReview.blocking.length})
                           </p>
-                          <ul className="flex flex-col gap-2">
+                          <ul className="grid grid-cols-2 gap-3">
                             {latestReview.blocking.map((f, i) => (
-                              <li key={i} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
-                                <p className="text-xs font-mono text-red-600 truncate">{f.file}{f.line ? `:${f.line}` : ''}</p>
-                                <p className="mt-0.5 text-xs text-red-700">{f.message}</p>
+                              <li key={i} className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                                <p className="text-xs font-mono font-semibold text-red-600">{f.file}{f.line ? `:${f.line}` : ''}</p>
+                                <p className="mt-1 text-sm text-red-700 leading-snug">{f.message}</p>
                               </li>
                             ))}
                           </ul>
@@ -349,14 +354,14 @@ export const PipelineDiagram = (): React.ReactElement => {
                       )}
                       {latestReview.suggestions.length > 0 && (
                         <div>
-                          <p className="mb-2 text-xs font-semibold text-amber-500 uppercase tracking-wide">
+                          <p className="mb-3 text-xs font-semibold text-amber-500 uppercase tracking-wider">
                             Suggestions ({latestReview.suggestions.length})
                           </p>
-                          <ul className="flex flex-col gap-2">
+                          <ul className="grid grid-cols-2 gap-3">
                             {latestReview.suggestions.map((f, i) => (
-                              <li key={i} className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-                                <p className="text-xs font-mono text-amber-600 truncate">{f.file}{f.line ? `:${f.line}` : ''}</p>
-                                <p className="mt-0.5 text-xs text-amber-700">{f.message}</p>
+                              <li key={i} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                                <p className="text-xs font-mono font-semibold text-amber-600">{f.file}{f.line ? `:${f.line}` : ''}</p>
+                                <p className="mt-1 text-sm text-amber-700 leading-snug">{f.message}</p>
                               </li>
                             ))}
                           </ul>
