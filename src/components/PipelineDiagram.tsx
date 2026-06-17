@@ -57,7 +57,6 @@ const fmtDuration = (ms: number): string => {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-const fmtCost = (usd: number): string => `$${usd.toFixed(4)}`
 
 export const PipelineDiagram = (): React.ReactElement => {
   const [run, setRun] = useState<RunState | null>(null)
@@ -122,7 +121,6 @@ export const PipelineDiagram = (): React.ReactElement => {
   }, [])
 
   const stateFor = (id: PipelineStep) => run?.steps.find(s => s.step === id)
-  const totalCost = run?.steps.reduce((sum, s) => sum + (s.costUsd ?? 0), 0) ?? 0
   const allFiles = [...new Set(run?.steps.filter(s => s.filesChanged).flatMap(s => s.filesChanged ?? []) ?? [])]
   const latestReview = [...(run?.steps.filter(s => s.step === 'reviewer' && s.reviewData) ?? [])].pop()?.reviewData ?? null
   const isDone = stateFor('done')?.status === 'done'
@@ -161,26 +159,16 @@ export const PipelineDiagram = (): React.ReactElement => {
       {/* Header */}
       <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-gray-900">
-              {run ? run.ticketKey : 'Waiting for pipeline…'}
-            </h2>
-            {run && totalCost > 0 && (
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600 ring-1 ring-inset ring-amber-200">
-                {fmtCost(totalCost)} total
-              </span>
-            )}
-          </div>
+          <h2 className="text-base font-semibold text-gray-900">
+            {run ? run.ticketKey : 'Waiting for pipeline…'}
+          </h2>
           <p className="mt-0.5 text-sm text-gray-500">
             {run?.ticketSummary ?? 'Move a Jira ticket to In Progress to start the pipeline.'}
           </p>
         </div>
         <div className="flex items-center gap-4">
           {run && (
-            <div className="flex items-center gap-3 text-sm">
-              <span className="font-mono text-gray-500">{fmtDuration(elapsed * 1000)}</span>
-              {totalCost > 0 && <span className="font-semibold text-amber-500">{fmtCost(totalCost)}</span>}
-            </div>
+            <span className="font-mono text-sm text-gray-500">{fmtDuration(elapsed * 1000)}</span>
           )}
           {isRunning && (
             <button
@@ -285,10 +273,6 @@ export const PipelineDiagram = (): React.ReactElement => {
                       }`}>
                         {state?.label ?? def.label}
                       </p>
-                      {/* Cost — only for agent steps */}
-                      {def.isAgent && (done || failed) && state?.costUsd && state.costUsd > 0 && (
-                        <span className="text-xs font-semibold text-amber-500">{fmtCost(state.costUsd)}</span>
-                      )}
                     </div>
 
                     {/* Detail text */}
