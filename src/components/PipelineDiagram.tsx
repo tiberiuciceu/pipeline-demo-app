@@ -319,7 +319,7 @@ export const PipelineDiagram = (): React.ReactElement => {
                   : (
                     <ul className="grid grid-cols-2 gap-2">
                       {allFiles.map(f => (
-                        <li key={f} className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-3 border border-gray-100">
+                        <li key={f} title={f} className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-3 border border-gray-100 cursor-default">
                           <FileIcon />
                           <span className="text-sm font-mono text-gray-700 truncate">{f}</span>
                         </li>
