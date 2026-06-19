@@ -59,7 +59,7 @@ export default function ProjectsPage(): React.ReactElement {
           <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Projects</h1>
           <p className="mt-1 text-sm text-gray-500">{projects.length} active projects</p>
         </div>
-        <button className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 transition-colors">
+        <button className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-500 transition-colors">
           New Project
         </button>
       </div>
